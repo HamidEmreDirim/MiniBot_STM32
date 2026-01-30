@@ -1,0 +1,7 @@
+../Core/Src/library/adxl_345_imu.c:7:6:adxl_write	32	static
+../Core/Src/library/adxl_345_imu.c:15:6:adxl_read_values	32	static
+../Core/Src/library/adxl_345_imu.c:20:6:adxl_read_address	32	static
+../Core/Src/library/adxl_345_imu.c:25:6:adxl_init	8	static
+../Core/Src/library/adxl_345_imu.c:35:9:adxl_readx	16	static
+../Core/Src/library/adxl_345_imu.c:43:9:adxl_ready	16	static
+../Core/Src/library/adxl_345_imu.c:51:9:adxl_readz	16	static

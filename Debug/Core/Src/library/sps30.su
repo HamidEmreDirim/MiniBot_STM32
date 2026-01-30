@@ -1,0 +1,9 @@
+../Core/Src/library/sps30.c:9:16:Sensirion_CalcCRC	24	static
+../Core/Src/library/sps30.c:24:14:BytesToFloat	24	static
+../Core/Src/library/sps30.c:36:19:SPS30_Init	32	static
+../Core/Src/library/sps30.c:46:19:SPS30_StartMeasurement	32	static
+../Core/Src/library/sps30.c:63:19:SPS30_StopMeasurement	32	static
+../Core/Src/library/sps30.c:68:9:SPS30_ReadDataReady	32	static
+../Core/Src/library/sps30.c:80:19:SPS30_ReadMeasurement	112	static
+../Core/Src/library/sps30.c:119:19:SPS30_WakeUp	32	static
+../Core/Src/library/sps30.c:128:19:SPS30_Sleep	32	static

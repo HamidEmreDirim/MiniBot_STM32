@@ -1,0 +1,7 @@
+../Core/Src/main.c:134:9:get_battery_percentage	6
+../Core/Src/main.c:174:5:_write	1
+../Core/Src/main.c:203:6:Process_Serial_Input	20
+../Core/Src/main.c:325:5:main	36
+../Core/Src/main.c:669:6:SystemClock_Config	3
+../Core/Src/main.c:713:6:HAL_GPIO_EXTI_Callback	1
+../Core/Src/main.c:726:6:Error_Handler	1

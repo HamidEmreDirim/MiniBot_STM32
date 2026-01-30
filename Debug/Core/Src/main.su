@@ -1,0 +1,7 @@
+../Core/Src/main.c:134:9:get_battery_percentage	48	static
+../Core/Src/main.c:174:5:_write	24	static
+../Core/Src/main.c:203:6:Process_Serial_Input	80	static
+../Core/Src/main.c:325:5:main	840	static
+../Core/Src/main.c:669:6:SystemClock_Config	88	static
+../Core/Src/main.c:713:6:HAL_GPIO_EXTI_Callback	16	static
+../Core/Src/main.c:726:6:Error_Handler	4	static,ignoring_inline_asm

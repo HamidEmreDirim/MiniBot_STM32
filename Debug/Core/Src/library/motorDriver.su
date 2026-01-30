@@ -1,0 +1,2 @@
+../Core/Src/library/motorDriver.c:10:6:Motor_Init	8	static
+../Core/Src/library/motorDriver.c:27:6:Motor_Move	72	static

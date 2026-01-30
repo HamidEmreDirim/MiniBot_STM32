@@ -1,0 +1,14 @@
+../Core/Src/library/gps.c:26:13:nmea_checksum_ok	48	static
+../Core/Src/library/gps.c:44:15:rstrip_crlf	16	static
+../Core/Src/library/gps.c:52:17:append_bytes	32	static
+../Core/Src/library/gps.c:62:17:append_str	32	static
+../Core/Src/library/gps.c:67:17:append_int32	48	static
+../Core/Src/library/gps.c:82:17:append_ftoa_fixed	120	static
+../Core/Src/library/gps.c:124:15:parse_lat_ddmm	64	static
+../Core/Src/library/gps.c:136:15:parse_lon_dddmm	64	static
+../Core/Src/library/gps.c:148:12:split_fields	40	static
+../Core/Src/library/gps.c:168:13:summary_init	16	static
+../Core/Src/library/gps.c:178:13:parse_sentence	208	static
+../Core/Src/library/gps.c:256:17:format_summary	96	static
+../Core/Src/library/gps.c:341:10:get_gps_data	672	static,ignoring_inline_asm
+../Core/Src/library/gps.c:384:6:HAL_UARTEx_RxEventCallback	16	static,ignoring_inline_asm

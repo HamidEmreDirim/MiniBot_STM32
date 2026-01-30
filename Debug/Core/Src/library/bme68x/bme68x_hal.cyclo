@@ -1,0 +1,4 @@
+../Core/Src/library/bme68x/bme68x_hal.c:10:22:bme68x_i2c_read	2
+../Core/Src/library/bme68x/bme68x_hal.c:25:22:bme68x_i2c_write	2
+../Core/Src/library/bme68x/bme68x_hal.c:40:6:bme68x_delay_us	3
+../Core/Src/library/bme68x/bme68x_hal.c:54:8:BME68x_Init_Wrapper	1
