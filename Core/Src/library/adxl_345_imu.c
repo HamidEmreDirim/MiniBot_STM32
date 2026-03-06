@@ -27,6 +27,7 @@ void adxl_init (void)
 	adxl_read_address (0x00); // read the DEVID
 
 	adxl_write (0x31, 0x01);  // data_format range= +- 4g
+	adxl_write (0x2C, 0x09);  // BW_RATE = 50Hz (filters high freq noise)
 	adxl_write (0x2d, 0x00);  // reset all bits
 	adxl_write (0x2d, 0x08);  // power_cntl measure and wake up 8hz
 

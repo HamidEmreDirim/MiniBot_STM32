@@ -33,20 +33,20 @@
 #include "math.h"
 #include "string.h"
 #include "stdarg.h"
-#include "library/adxl_345_imu.h"
+#include "library/BNO055_STM32.h"
 #include "library/gps.h"
 #include "usbd_cdc_if.h"
 #include "library/motorDriver.h"
 #include "library/INA219.h"
 #include "library/EEPROM.h"
+#include "library/sps30.h"
+#include "library/bme68x/bme68x.h"
 
 
 
 
 
 /* USER CODE END Includes */
-#include "library/sps30.h"
-#include "library/bme68x/bme68x_necessary_functions.h"
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
@@ -65,13 +65,25 @@
 // BME688 Variables
 // struct bme68x_dev bme; // Handled by library
 struct bme68x_data bme_data;
-// struct bme68x_conf bme_conf; // Handled by library
-// struct bme68x_heatr_conf bme_heatr_conf; // Handled by library
 SPS30_Data_t sps_data;
+
+// --- Sensor Frequencies (Hz) ---
+uint32_t freq_gps_hz = 1;
+uint32_t freq_air_hz = 1;
+uint32_t freq_imu_hz = 10;
+uint32_t freq_sps_hz = 1;
+
+// --- Sensor Timers ---
+uint32_t last_tick_gps = 0;
+uint32_t last_tick_air = 0;
+uint32_t last_tick_imu = 0;
+uint32_t last_tick_sps = 0;
+
+// --- BNO055 Data ---
+BNO055_Sensors_t bno_data;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-
 
 /* USER CODE BEGIN PV */
 
@@ -88,10 +100,6 @@ static uint16_t rx_accum_head = 0;
 
 void Process_Serial_Input(void); // Prototype
 
-
-const char* CMD_HELLO = "CMD_HELLO";
-const char* ACK_ROCKPI = "ACK_READY";
-
 typedef enum {
     MODE_IDLE,
     MODE_ARMED,
@@ -103,15 +111,13 @@ RobotMode current_mode = MODE_IDLE;
 float speed_limit = 0.0f;
 uint32_t last_telemetry_time = 0;
 
-uint8_t handshake_complete = 0;
-uint32_t last_hello_time = 0;
-
 // Status Flags
-uint8_t status_imu = 0;
-uint8_t status_bme = 0;
-uint8_t status_sps = 0;
+int8_t status_imu = -1;
+int8_t status_bme = -1;
+int8_t status_sps = -1;
 uint8_t status_ina = 0;
 uint32_t last_status_time = 0;
+uint8_t bno_calibration_flag = 0; // Set to 1 to run calibration mode
 
 INA219_t ina219;
 
@@ -123,17 +129,35 @@ typedef struct {
 const BatteryCurvePoint bat_curve[] = {
     {14.6f, 100.0f},
     {13.6f, 100.0f},
-    {13.4f, 99.0f},
+    {13.5f, 99.0f},
+    {13.4f, 95.0f},
     {13.3f, 90.0f},
-    {13.2f, 70.0f},
-    {13.1f, 40.0f},
-    {13.0f, 30.0f},
-    {12.9f, 20.0f},
-    {12.8f, 17.0f},
-    {12.5f, 14.0f},
-    {12.0f, 9.0f},
-    {10.0f, 0.0f}
+    {13.25f, 80.0f},
+    {13.2f,  70.0f},
+    {13.15f, 60.0f},
+    {13.1f,  50.0f},
+    {13.05f, 40.0f},
+    {13.0f,  30.0f},
+    {12.9f,  20.0f},
+    {12.8f,  15.0f},
+    {12.5f,  10.0f},
+    {12.0f,  5.0f},
+    {11.0f,  0.0f}
 };
+
+// Battery History for Peak Hold
+#define BAT_HIST_SIZE 100
+float bat_history[BAT_HIST_SIZE] = {0};
+uint8_t bat_hist_idx = 0;
+uint32_t last_bat_hist_time = 0;
+
+float get_max_history() {
+    float max_v = 0.0f;
+    for(int i=0; i<BAT_HIST_SIZE; i++) {
+        if(bat_history[i] > max_v) max_v = bat_history[i];
+    }
+    return max_v;
+}
 
 uint8_t get_battery_percentage(float voltage)
 {
@@ -158,7 +182,6 @@ uint8_t get_battery_percentage(float voltage)
 }
 
 
-/* USER CODE END PV */
 
 /* USER CODE END PV */
 
@@ -204,13 +227,9 @@ int _write(int file, char *ptr, int len) {
 
 /* USER CODE END 0 */
 
-/* USER CODE END 0 */
-
 void Process_Serial_Input(void)
 {
     // 1. Process Incoming Data with Buffering
-    // Loop until we drain the buffer or hit a limit (flow control)
-    // We limit to 5 reads per call to allow main loop to continue even under flood
     int reads = 0;
     while (VCP_available() > 0 && reads < 5)
     {
@@ -235,7 +254,7 @@ void Process_Serial_Input(void)
             // Temporarily terminate the line
             *newline_ptr = '\0';
             char* line = (char*)rx_accum;
-            printf("RX Line: %s\n", line); // Debug Print
+            // printf("RX Line: %s\n", line); // Debug Print
             
             // --- PROCESS LINE START ---
             // Mode Switching
@@ -265,8 +284,6 @@ void Process_Serial_Input(void)
                 float v = 0.0f;
                 float w = 0.0f;
 
-                // Parse message: {v=0.1, w=0.1}
-                // Note: sscanf is robust enough to find the pattern even if there is noise around it
                 if (sscanf(line, "{v=%f, w=%f", &v, &w) == 2)
                 {
                     // Apply Speed Limit
@@ -287,23 +304,22 @@ void Process_Serial_Input(void)
                     if (pwm_left > 100) pwm_left = 100;
                     if (pwm_right > 100) pwm_right = 100;
 
-                    Motor_Move(1, dir_left, pwm_left, 1);
-                    Motor_Move(2, dir_left, pwm_left, 1);
-                    Motor_Move(3, dir_right, pwm_right, 1);
-                    Motor_Move(4, dir_right, pwm_right, 1);
+                    Motor_Move(1, -dir_left, pwm_left, 1);     // Left Rear
+                    Motor_Move(4, -dir_left, pwm_left, 1);     // Front Left
+                    
+                    Motor_Move(3, -dir_right, pwm_right, 1);   // Front Right
+                    Motor_Move(2, dir_right, pwm_right, 1);    // Right Rear
                 }
             }
             
             // Camera LED Control
             int cam_led_val = 0;
-            // Support both "cam_led:100" and "cam_led 100"
             if (sscanf(line, "cam_led %d", &cam_led_val) == 1 || sscanf(line, "cam_led:%d", &cam_led_val) == 1)
             {
                 if (cam_led_val > 100) cam_led_val = 100;
                 if (cam_led_val < 0) cam_led_val = 0;
                 
                 cam_led_duty = (uint8_t)cam_led_val;
-                printf("CAM_LED set to %d%%\r\n", cam_led_duty);
             }
             // --- PROCESS LINE END ---
 
@@ -348,7 +364,22 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-
+  // Soft disconnect for USB
+  // Simulate cable unplug by pulling D+ (PA12) low
+  // Using open-drain with pull-down is safer than push-pull
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  
+  GPIO_InitStruct.Pin = GPIO_PIN_12;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
+  HAL_Delay(1000); // Wait 1 second for host to detect disconnect
+  
+  HAL_GPIO_DeInit(GPIOA, GPIO_PIN_12); // Release pin for USB IP
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -364,28 +395,11 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM3_Init();
   MX_USART2_UART_Init();
-  MX_USART2_UART_Init();
   MX_USART6_UART_Init();
   MX_TIM12_Init();
-  MX_TIM6_Init(); // Init Soft PWM Timer
-  /* USER CODE BEGIN 2 */
-  // Soft disconnect for USB
-  // Force USB D+ (PA12) low for 500ms to ensure host sees a disconnect
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  
-  GPIO_InitStruct.Pin = GPIO_PIN_12;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-  
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
-  HAL_Delay(500); // Wait for host to detect disconnect
-  
-  HAL_GPIO_DeInit(GPIOA, GPIO_PIN_12); // Release pin for USB IP
-  
   MX_USB_DEVICE_Init();
+  /* USER CODE BEGIN 2 */
+  /* USER CODE BEGIN 2 */
 
   // Optional: Start PWM timers just to have signal on pins,
   // even if we don't actively change them during test loop.
@@ -404,13 +418,57 @@ int main(void)
 
     printf("System Initializing...\r\n");
 
-    adxl_init();
-    if (chipid == 0xE5) {
-        printf("IMU: Connected (ID: 0xE5)\r\n");
-        status_imu = 1;
+    // BNO055 (I2C3)
+    printf("Initializing BNO055...\r\n");
+    if (HAL_I2C_IsDeviceReady(&hi2c3, (0x28 << 1), 5, 100) == HAL_OK) {
+        BNO055_Init_t bno_init = {
+            .Unit_Sel     = UNIT_ORI_WINDOWS | UNIT_TEMP_CELCIUS | UNIT_EUL_DEG | UNIT_GYRO_DPS | UNIT_ACC_MS2,
+            .Axis         = DEFAULT_AXIS_REMAP,
+            .Axis_sign    = DEFAULT_AXIS_SIGN,
+            .Mode         = BNO055_NORMAL_MODE,
+            .OP_Modes     = NDOF,
+            .Clock_Source = CLOCK_INTERNAL,
+            .ACC_Range    = Range_4G,
+        };
+        BNO055_Init(bno_init);
+        
+        BNO055_Init(bno_init);
+        
+        uint8_t bno_offsets[22];
+
+        // Calibration Routine Check
+        if (bno_calibration_flag == 1) {
+            printf("BNO055 Calibration Mode Enabled. Starting calibration sequence...\r\n");
+            Calibrate_BNO055();
+            printf("Calibration sequence completed.\r\n");
+            
+            // Get the new offsets and write to EEPROM
+            getSensorOffsets(bno_offsets);
+            EEPROM_Write(0, 0, bno_offsets, 22);
+            printf("Calibration offsets written to EEPROM. Set bno_calibration_flag to 0 and reboot!\r\n");
+            
+            // Halt the system here so the user can reflash with flag 0
+            while(1) {
+                HAL_Delay(1000);
+            }
+        } else {
+            // Read offsets from EEPROM and apply them
+            EEPROM_Read(0, 0, bno_offsets, 22);
+            
+            // Basic sanity check: if the first few bytes are 0xFF (uninitialized EEPROM), warn the user
+            if(bno_offsets[0] == 0xFF && bno_offsets[1] == 0xFF) {
+                printf("WARNING: EEPROM offsets appear uninitialized. Please run Calibration Mode.\r\n");
+            } else {
+                setSensorOffsets(bno_offsets);
+                printf("Loaded Calibration offsets from EEPROM.\r\n");
+            }
+        }
+
+        status_imu = 0; // 0 is OK
+        printf("BNO055 Init... OK\r\n");
     } else {
-        printf("IMU: Not Connected (ID: 0x%02X)\r\n", chipid);
-        status_imu = 0;
+        printf("BNO055 Init... FAIL (Not Detected)\r\n");
+        status_imu = -1;
     }
 
     printf("GPS: UART RX DMA Started\r\n");
@@ -435,14 +493,7 @@ int main(void)
         }
     }
 
-    /* --- I2C Scanner --- */
-    printf("Scanning I2C3 bus...\r\n");
-    for(uint16_t i = 1; i < 128; i++) {
-        if(HAL_I2C_IsDeviceReady(&hi2c3, i << 1, 1, 10) == HAL_OK) {
-            printf("I2C3 Device found at 0x%02X\r\n", i);
-        }
-    }
-    printf("Scan complete.\r\n");
+    // I2C Scanner removed intentionally to prevent BNO055 and BME688 zero-byte write crashes.
 
     /* --- BME688 & SPS30 Initialization --- */
     /* --- BME688 & SPS30 Initialization --- */
@@ -461,6 +512,8 @@ int main(void)
     }
 
     printf("Initializing SPS30...\r\n");
+    SPS30_WakeUp(&hi2c3); // Wake up the module first because it often starts asleep and NACKs everything
+    HAL_Delay(100);
     if(SPS30_Init(&hi2c3) == HAL_OK)
     {
         printf("SPS30 Initialized.\r\n");
@@ -478,186 +531,201 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint32_t last_sps_time = 0;
-  uint32_t last_bme_time = 0;
   
-  // IMU Filter Variables
-  float filt_x = 0, filt_y = 0, filt_z = 0;
-  const float alpha = 0.1f; // Smoothing factor (0.0 - 1.0)
+  // --- Background Sensor Polling Variables ---
+  uint32_t last_sps_poll_time = 0;
+  uint32_t last_bme_poll_time = 0;
+  uint8_t bme_waiting_data = 0;
+  uint32_t bme_wait_ms = 0;
   
+  // Battery Filter Variables
+  float filt_bat_v = 0.0f;
+  const float alpha_bat = 0.02f; // Very slow filter for battery (50 taps equiv)
+  uint8_t first_bat_read = 1;
+
   uint32_t last_gps_ver = 0;
 
   while (1)
   {
-    // --- Sensor Update Loop (1Hz) ---
-    // --- Fast Sensor Loop (10Hz) for SPS30 ---
-    if (HAL_GetTick() - last_sps_time >= 100)
+    Process_Serial_Input();
+
+    // --- GPS Data Publishing Loop (Event-Driven) ---
+    if (gps_version != last_gps_ver) {
+        last_gps_ver = gps_version;
+        uint16_t size = 0;
+        uint8_t* data = get_gps_data(&gps_ring, &size);
+        if (size > 0) {
+            if (size < 512) {
+                data[size] = '\0';
+            } else {
+                data[511] = '\0';
+            }
+             
+            if (VCP_is_tx_busy() == 0) {
+                CDC_Transmit_FS(data, size);
+            }
+        }
+    }
+
+    // --- BNO055 ---
+    if (freq_imu_hz > 0 && (HAL_GetTick() - last_tick_imu >= (1000 / freq_imu_hz)))
     {
-        last_sps_time = HAL_GetTick();
-        
-        // Read SPS30 Only if initialized
-        if (status_sps) {
-            if(SPS30_ReadDataReady(&hi2c3))
-            {
+        if (status_imu == 0) {
+            ReadData(&bno_data,
+                     SENSOR_ACCEL | SENSOR_GYRO | SENSOR_MAG |
+                     SENSOR_EULER | SENSOR_LINACC | SENSOR_GRAVITY | SENSOR_QUATERNION);
+        }
+
+        char buf[512];
+        int len = snprintf(buf, sizeof(buf),
+            "{\"imu\":{"
+            "\"accel\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f},"
+            "\"gyro\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f},"
+            "\"mag\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f},"
+            "\"euler\":{\"heading\":%.2f,\"roll\":%.2f,\"pitch\":%.2f},"
+            "\"linacc\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f},"
+            "\"gravity\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f},"
+            "\"quat\":{\"w\":%.4f,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f}"
+            "}}\n",
+            bno_data.Accel.X,     bno_data.Accel.Y,     bno_data.Accel.Z,
+            bno_data.Gyro.X,      bno_data.Gyro.Y,      bno_data.Gyro.Z,
+            bno_data.Magneto.X,   bno_data.Magneto.Y,   bno_data.Magneto.Z,
+            bno_data.Euler.X,     bno_data.Euler.Y,     bno_data.Euler.Z,
+            bno_data.LineerAcc.X, bno_data.LineerAcc.Y, bno_data.LineerAcc.Z,
+            bno_data.Gravity.X,   bno_data.Gravity.Y,   bno_data.Gravity.Z,
+            bno_data.Quaternion.W, bno_data.Quaternion.X,
+            bno_data.Quaternion.Y, bno_data.Quaternion.Z);
+
+        if (len > 0 && VCP_is_tx_busy() == 0) {
+            CDC_Transmit_FS((uint8_t*)buf, len);
+            last_tick_imu = HAL_GetTick();
+        }
+    }
+
+    // --- Background Polling Loop for SPS30 (10Hz) ---
+    if (HAL_GetTick() - last_sps_poll_time >= 100)
+    {
+        last_sps_poll_time = HAL_GetTick();
+        if (status_sps == 1) {
+            if (SPS30_ReadDataReady(&hi2c3)) {
                 SPS30_ReadMeasurement(&hi2c3, &sps_data);
             }
         }
     }
 
-    // --- Slow Sensor Loop (Every 3 Seconds) for BME688 ---
-    if (HAL_GetTick() - last_bme_time >= 3000)
-    {
-        last_bme_time = HAL_GetTick();
-
-        if (status_bme) {
-            // Read BME688 (New Lib)
-            int8_t result = bme68x_single_measure(&bme_data);
-            
-            float iaq_score = bme68x_iaq(); 
-
-            if (result != 0)
-            {
-                 printf("BME688 Measure Failed: %d\r\n", result);
-                 // If it fails repeatedly, maybe set status_bme = 0? 
-                 // For now, just report error.
-            }
-            else
-            {
-                 // Debug Print for Logic Analysis
-                 printf("BME688 [Debug] T: %.2f C | H: %.2f %% | P: %.2f hPa | G: %.2f Ohms | IAQ: %.2f\r\n", 
-                        bme_data.temperature, bme_data.humidity, bme_data.pressure, bme_data.gas_resistance, iaq_score);
-            }
-        }
-    }
-
-    // --- GPS Print Loop ---
-    if (gps_version != last_gps_ver) {
-        last_gps_ver = gps_version;
-        
-        uint16_t osize = 0;
-        uint8_t* gbuf = get_gps_data(&gps_ring, &osize);
-        
-        if(osize > 0) {
-             // Safe null termination to prevent printing garbage or buffer overflow
-             if (osize < 512) {
-                 gbuf[osize] = '\0';
-             } else {
-                 gbuf[511] = '\0';
-             }
-             
-             // printf("GPS: %s", (char*)gbuf); 
-        }
-    }
-
-
-    // Handshake Logic
-    if (!handshake_complete)
-    {
-      if (HAL_GetTick() - last_hello_time >= 100)
-      {
-        if (VCP_is_tx_busy() == 0)
+    // --- Background Polling Loop for BME688 (1/3 Hz) ---
+    if (status_bme == 1) {
+        if (!bme_waiting_data && (HAL_GetTick() - last_bme_poll_time >= 3000))
         {
-          CDC_Transmit_FS((uint8_t*)CMD_HELLO, strlen(CMD_HELLO));
-          last_hello_time = HAL_GetTick();
+            last_bme_poll_time = HAL_GetTick();
+            bme68x_trigger_measure();
+            bme_wait_ms = bme68x_get_delay_ms();
+            bme_waiting_data = 1;
         }
-      }
-
-      // Check for ACK
-      if (VCP_available() > 0)
-      {
-         // Simple read for handshake is fine as it's a short, single message interaction
-         uint16_t len = VCP_read_buffer(rx_buffer_main, 1024);
-         rx_buffer_main[len] = '\0'; // Null terminate
-         
-         printf("HS RX: %s\n", rx_buffer_main); // Debug Handshake RX
-
-         if (strstr((char*)rx_buffer_main, ACK_ROCKPI) != NULL)
-         {
-             handshake_complete = 1;
-             printf("Handshake Complete!\n");
-         }
-      }
+        else if (bme_waiting_data && (HAL_GetTick() - last_bme_poll_time >= bme_wait_ms))
+        {
+            bme68x_read_measure(&bme_data);
+            bme_waiting_data = 0;
+        }
     }
-    // Normal Operation Logic
-    else
+
+    // --- SPS30 Publishing ---
+    if (freq_sps_hz > 0 && (HAL_GetTick() - last_tick_sps >= (1000 / freq_sps_hz)))
     {
-        Process_Serial_Input();
+        float pm1 = 0, pm25 = 0, pm4 = 0, pm10 = 0;
 
-         // 2. Global Telemetry (Sent in ALL modes)
-         if (HAL_GetTick() - last_telemetry_time >= 100) // 10Hz
-         {
-             if (VCP_is_tx_busy() == 0) {
-                char telemetry[512]; // Increased buffer size
-                
-                // Read Raw IMU if connected
-                int16_t raw_x = 0, raw_y = 0, raw_z = 0;
-                if (status_imu) {
-                    raw_x = adxl_readx();
-                    raw_y = adxl_ready();
-                    raw_z = adxl_readz();
+        if (status_sps == 1) {
+            pm1 = sps_data.mass_1p0;
+            pm25 = sps_data.mass_2p5;
+            pm4 = sps_data.mass_4p0;
+            pm10 = sps_data.mass_10p0;
+        }
+
+        char buf[256];
+        int len = snprintf(buf, sizeof(buf), 
+            "{\"sps\":{\"pm1.0\":%.2f,\"pm2.5\":%.2f,\"pm4.0\":%.2f,\"pm10\":%.2f}}\n", 
+            pm1, pm25, pm4, pm10);
+        if (len > 0 && VCP_is_tx_busy() == 0) {
+            CDC_Transmit_FS((uint8_t*)buf, len);
+            last_tick_sps = HAL_GetTick();
+        }
+    }
+
+    // --- BME688 Publishing ---
+    if (freq_air_hz > 0 && (HAL_GetTick() - last_tick_air >= (1000 / freq_air_hz)))
+    {
+        float iaq = 0, temp = 0, hum = 0;
+        
+        if (status_bme == 1) {
+            iaq = bme68x_iaq();
+            temp = bme_data.temperature;
+            hum = bme_data.humidity;
+        }
+
+        char buf[128];
+        int len = snprintf(buf, sizeof(buf), "{\"air\":{\"iaq\":%.2f,\"temp\":%.2f,\"hum\":%.2f}}\n", 
+                           iaq, temp, hum);
+        if (len > 0 && VCP_is_tx_busy() == 0) {
+             CDC_Transmit_FS((uint8_t*)buf, len);
+             last_tick_air = HAL_GetTick();
+        }
+    }
+
+    // --- Battery & Status Telemetry (Sent in ALL modes) ---
+    if (HAL_GetTick() - last_telemetry_time >= 2000) // 0.5Hz
+    {
+        if (VCP_is_tx_busy() == 0) {
+            char telemetry[512];
+            
+            // Read INA if connected
+            float bus_voltage_V = 0.0f;
+            int16_t current_mA = 0;
+            if (status_ina == 1) {
+                bus_voltage_V = INA219_ReadBusVoltage(&ina219) / 1000.0f;
+                current_mA = INA219_ReadCurrent(&ina219);
+            }
+            
+            if (current_mA < 0) current_mA = -current_mA;
+
+            // --- Battery Filtering ---
+            if (first_bat_read) {
+                filt_bat_v = bus_voltage_V;
+                first_bat_read = 0;
+            } else {
+                if (bus_voltage_V < 1.0f) {
+                    filt_bat_v = bus_voltage_V;
+                } 
+                else if (current_mA < 300) {
+                    filt_bat_v = (alpha_bat * bus_voltage_V) + ((1.0f - alpha_bat) * filt_bat_v);
                 }
+            }
 
-                // Apply Low Pass Filter
-                filt_x = (alpha * raw_x) + ((1.0f - alpha) * filt_x);
-                filt_y = (alpha * raw_y) + ((1.0f - alpha) * filt_y);
-                filt_z = (alpha * raw_z) + ((1.0f - alpha) * filt_z);
+            // --- 100s Peak Hold Logic ---
+            if (HAL_GetTick() - last_bat_hist_time >= 1000) {
+                bat_history[bat_hist_idx] = filt_bat_v;
+                bat_hist_idx = (bat_hist_idx + 1) % BAT_HIST_SIZE;
+                last_bat_hist_time = HAL_GetTick();
+            }
+            
+            if (bat_history[0] == 0.0f && filt_bat_v > 5.0f) {
+                    for(int i=0; i<BAT_HIST_SIZE; i++) bat_history[i] = filt_bat_v;
+            }
 
-                // Read INA if connected
-                float bus_voltage_V = 0.0f;
-                if (status_ina) {
-                    bus_voltage_V = INA219_ReadBusVoltage(&ina219) / 1000.0f;
-                }
-                uint8_t bat_pct = get_battery_percentage(bus_voltage_V);
-                
-                // Determine Mode String
-                const char* mode_str = "IDLE";
-                if (current_mode == MODE_ARMED) mode_str = "ARMED";
-                else if (current_mode == MODE_ARMED_PLUS) mode_str = "ARMED+";
-                else if (current_mode == MODE_ECO) mode_str = "ECO";
+            float peak_bat_v = get_max_history();
+            uint8_t bat_pct = get_battery_percentage(peak_bat_v);
+            
+            // Determine Mode String
+            const char* mode_str = "IDLE";
+            if (current_mode == MODE_ARMED) mode_str = "ARMED";
+            else if (current_mode == MODE_ARMED_PLUS) mode_str = "ARMED+";
+            else if (current_mode == MODE_ECO) mode_str = "ECO";
 
-                // Send FILTERED IMU values (casted to int for display)
-                // Get BME Values safely
-                float temp = 0.0f, hum = 0.0f, press = 0.0f, gas = 0.0f, iaq = 0.0f;
-                if (status_bme) {
-                    temp = bme_data.temperature;
-                    hum = bme_data.humidity;
-                    press = bme_data.pressure;
-                    gas = bme_data.gas_resistance;
-                    iaq = bme68x_iaq();
-                }
+            sprintf(telemetry, "{\"status\":{\"mode\":\"%s\", \"bat_v\":%.2f, \"bat_pct\":%d, \"imu\":%d, \"bme\":%d, \"sps\":%d, \"ina\":%d}}\n", 
+                    mode_str, bus_voltage_V, bat_pct, (status_imu==0?1:0), status_bme, status_sps, status_ina);
 
-                sprintf(telemetry, "{mode:%s, x:%d, y:%d, z:%d, bat_v:%.2f, bat_pct:%d, temp:%.2f, hum:%.2f, press:%.2f, iaq:%.2f, gas_res:%.2f, pm1:%.2f, pm2p5:%.2f, pm4:%.2f, pm10:%.2f}\n", 
-                        mode_str, (int)filt_x, (int)filt_y, (int)filt_z, bus_voltage_V, bat_pct,
-                        temp, hum, press, iaq, gas,
-                        sps_data.mass_1p0, sps_data.mass_2p5, sps_data.mass_4p0, sps_data.mass_10p0);
-
-                CDC_Transmit_FS((uint8_t*)telemetry, strlen(telemetry));
-                last_telemetry_time = HAL_GetTick();
-             }
-         }
-
-          // 3. Status Telemetry (1Hz)
-          if (HAL_GetTick() - last_status_time >= 1000) 
-          {
-              if (VCP_is_tx_busy() == 0) 
-              {
-                  char status_msg[128];
-                  
-                  // Re-determine Mode String (or reuse if scope allows, here we just check again)
-                  const char* mode_str_sts = "IDLE";
-                  if (current_mode == MODE_ARMED) mode_str_sts = "ARMED";
-                  else if (current_mode == MODE_ARMED_PLUS) mode_str_sts = "ARMED+";
-                  else if (current_mode == MODE_ECO) mode_str_sts = "ECO";
-
-                  sprintf(status_msg, "{\"type\":\"STATUS\", \"mode\":\"%s\", \"imu\":%d, \"bme\":%d, \"sps\":%d, \"ina\":%d}\n",
-                          mode_str_sts, status_imu, status_bme, status_sps, status_ina);
-
-                  CDC_Transmit_FS((uint8_t*)status_msg, strlen(status_msg));
-                  last_status_time = HAL_GetTick();
-              }
-          }
-
-
+            CDC_Transmit_FS((uint8_t*)telemetry, strlen(telemetry));
+            last_telemetry_time = HAL_GetTick();
+        }
     }
     /* USER CODE END WHILE */
 
@@ -746,32 +814,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 /* USER CODE END 4 */
 
 /**
-  * @brief TIM6 Initialization Function
-  * @param None
-  * @retval None
-  */
-void MX_TIM6_Init(void)
-{
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  htim6.Instance = TIM6;
-  htim6.Init.Prescaler = 84 - 1; // 84MHz / 84 = 1MHz count freq
-  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 100 - 1;   // 1MHz / 100 = 10kHz interrupt freq
-  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-}
-
-/**
   * @brief  This function is executed in case of error occurrence.
   * @retval None
   */
@@ -785,6 +827,7 @@ void Error_Handler(void)
 	}
   /* USER CODE END Error_Handler_Debug */
 }
+
 #ifdef  USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number

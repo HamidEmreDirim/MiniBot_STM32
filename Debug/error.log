@@ -1,0 +1,2 @@
+make: error: couldn't create cache file '/var/folders/02/xkzl85s545g16lky0fztqhm80000gn/T/xcrun_db-NxuAexhd' (errno=Operation not permitted)
+make: error: couldn't create cache file '/var/folders/02/xkzl85s545g16lky0fztqhm80000gn/T/xcrun_db-lvqX7UTW' (errno=Operation not permitted)

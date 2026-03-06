@@ -41,7 +41,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../USB_DEVICE/App/usb_device.h \
  ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_def.h \
  ../USB_DEVICE/Target/usbd_conf.h ../Core/Inc/gpio.h \
- ../Core/Src/library/adxl_345_imu.h ../Core/Src/library/gps.h \
+ ../Core/Src/library/BNO055_STM32.h ../Core/Src/library/gps.h \
  ../USB_DEVICE/App/usbd_cdc_if.h \
  ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc/usbd_cdc.h \
  ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h \
@@ -51,7 +51,6 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ctlreq.h \
  ../Core/Src/library/motorDriver.h ../Core/Src/library/INA219.h \
  ../Core/Src/library/EEPROM.h ../Core/Src/library/sps30.h \
- ../Core/Src/library/bme68x/bme68x_necessary_functions.h \
  ../Core/Src/library/bme68x/bme68x.h \
  ../Core/Src/library/bme68x/bme68x_defs.h
 ../Core/Inc/main.h:
@@ -103,7 +102,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_def.h:
 ../USB_DEVICE/Target/usbd_conf.h:
 ../Core/Inc/gpio.h:
-../Core/Src/library/adxl_345_imu.h:
+../Core/Src/library/BNO055_STM32.h:
 ../Core/Src/library/gps.h:
 ../USB_DEVICE/App/usbd_cdc_if.h:
 ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc/usbd_cdc.h:
@@ -116,6 +115,5 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Core/Src/library/INA219.h:
 ../Core/Src/library/EEPROM.h:
 ../Core/Src/library/sps30.h:
-../Core/Src/library/bme68x/bme68x_necessary_functions.h:
 ../Core/Src/library/bme68x/bme68x.h:
 ../Core/Src/library/bme68x/bme68x_defs.h:

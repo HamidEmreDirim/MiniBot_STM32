@@ -107,6 +107,21 @@ int8_t bme68x_single_measure(struct bme68x_data *dataPtr) {
 	return rslt;
 }
 
+int8_t bme68x_trigger_measure() {
+	return bme68x_set_op_mode(BME68X_FORCED_MODE, &bme);
+}
+
+uint32_t bme68x_get_delay_ms() {
+	del_period = bme68x_get_meas_dur(BME68X_FORCED_MODE, &conf, &bme)
+			+ (heatr_conf.heatr_dur * 1000);
+	return (del_period / 1000) + 1;
+}
+
+int8_t bme68x_read_measure(struct bme68x_data *dataPtr) {
+	rslt = bme68x_get_data(BME68X_FORCED_MODE, dataPtr, &n_fields, &bme);
+	return rslt;
+}
+
 /* Necessary functions. */
 // I2C write function.
 BME68X_INTF_RET_TYPE bme68x_i2c_write(uint8_t reg_addr, const uint8_t *reg_data,
@@ -133,7 +148,7 @@ BME68X_INTF_RET_TYPE bme68x_i2c_read(uint8_t reg_addr, uint8_t *reg_data,
 }
 
 // External reference to the serial processing function in main.c
-extern void Process_Serial_Input(void);
+
 
 // BME68x delay function
 void bme68x_delay_us(uint32_t period, void *intf_ptr) {
@@ -147,7 +162,7 @@ void bme68x_delay_us(uint32_t period, void *intf_ptr) {
     while((HAL_GetTick() - start) < delay_ms)
     {
         // Poll Serial Input to prevent buffer overflows during long sensor waits
-        Process_Serial_Input();
+
         
         // Yield slightly (1ms) to avoid looping too tight? 
         // Actually best not to sleep if we want max responsiveness, 
@@ -162,15 +177,9 @@ int8_t bme68x_interface_init(struct bme68x_dev *bme, uint8_t intf) {
 
 	if (bme != NULL) {
 
-		// Check for the device on the I2C line
-		if (HAL_I2C_IsDeviceReady(BME68x_I2C_Handler, (uint16_t) (dev_addr << 1), 5, 100)
-				== HAL_OK) {
-			// Device found at the I2C line.
-			rslt = 0;
-		} else {
-			rslt = -2; // Communication error.
-			return rslt;
-		}
+		// We intentionally bypass HAL_I2C_IsDeviceReady to prevent Bosch I2C zero-byte write crashes.
+		// Assume device is present. If it's not, subsequent configuration reads will naturally fail instead of crashing the bus.
+		rslt = 0;
 
 		/* Bus configuration : I2C */
 		if (intf == BME68X_I2C_INTF) {
@@ -212,15 +221,17 @@ int8_t bme68x_interface_init(struct bme68x_dev *bme, uint8_t intf) {
 
 /* IAQ functions */
 void bme68x_GetGasReference() {
-	// Now run the sensor for a burn-in period, then use combination of relative humidity and gas resistance to estimate indoor air quality as a percentage.
-
-	int readings = 10;
-	for (int i = 1; i <= readings; i++) { // read gas for 10 x 0.150mS = 1.5secs
-		bme68x_single_measure(BME68x_DATA);
-		gas_reference += BME68x_DATA->gas_resistance;
+	// MODIFIED FOR NON-BLOCKING operation in background telemetry loop.
+	// We already poll continuously in the background now.
+	// Base the gas reference on a low-pass filter of the running measurements
+	// instead of halting the system for 10 consecutive forced reads (takes 1.5 seconds)
+	if (BME68x_DATA != NULL && BME68x_DATA->gas_resistance > 0.0f) {
+		if (gas_reference == 250000.0f) {
+			gas_reference = BME68x_DATA->gas_resistance;
+		} else {
+			gas_reference = (gas_reference * 0.9f) + (BME68x_DATA->gas_resistance * 0.1f);
+		}
 	}
-	gas_reference = gas_reference / readings;
-
 }
 
 //Calculate humidity contribution to IAQ index

@@ -35,12 +35,19 @@
 #include "stdio.h"
 #include "string.h"
 
+extern uint8_t dev_addr;
+
 /* Function prototypes */
 // Complete initialisation and initial configuration of the I2C device. One function to configure all and then enables us to take measurements.
 int8_t bme68x_start(struct bme68x_data *dataPtr, I2C_HandleTypeDef *handler);
 
 // Forced mode measurement are taken with this function. Single-shot forced readings from the sensor.
-int8_t bme68x_single_measure();
+int8_t bme68x_single_measure(struct bme68x_data *dataPtr);
+
+// Non-blocking asynchronous measurement
+int8_t bme68x_trigger_measure();
+uint32_t bme68x_get_delay_ms();
+int8_t bme68x_read_measure(struct bme68x_data *dataPtr);
 
 // Get IAQ function.
 float bme68x_iaq();

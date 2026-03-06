@@ -5,6 +5,7 @@
 
 # Add inputs and outputs from these tool invocations to the build variables 
 C_SRCS += \
+../Core/Src/library/BNO055.c \
 ../Core/Src/library/EEPROM.c \
 ../Core/Src/library/INA219.c \
 ../Core/Src/library/adxl_345_imu.c \
@@ -15,6 +16,7 @@ C_SRCS += \
 ../Core/Src/library/sps30.c 
 
 OBJS += \
+./Core/Src/library/BNO055.o \
 ./Core/Src/library/EEPROM.o \
 ./Core/Src/library/INA219.o \
 ./Core/Src/library/adxl_345_imu.o \
@@ -25,6 +27,7 @@ OBJS += \
 ./Core/Src/library/sps30.o 
 
 C_DEPS += \
+./Core/Src/library/BNO055.d \
 ./Core/Src/library/EEPROM.d \
 ./Core/Src/library/INA219.d \
 ./Core/Src/library/adxl_345_imu.d \
@@ -42,7 +45,7 @@ Core/Src/library/%.o Core/Src/library/%.su Core/Src/library/%.cyclo: ../Core/Src
 clean: clean-Core-2f-Src-2f-library
 
 clean-Core-2f-Src-2f-library:
-	-$(RM) ./Core/Src/library/EEPROM.cyclo ./Core/Src/library/EEPROM.d ./Core/Src/library/EEPROM.o ./Core/Src/library/EEPROM.su ./Core/Src/library/INA219.cyclo ./Core/Src/library/INA219.d ./Core/Src/library/INA219.o ./Core/Src/library/INA219.su ./Core/Src/library/adxl_345_imu.cyclo ./Core/Src/library/adxl_345_imu.d ./Core/Src/library/adxl_345_imu.o ./Core/Src/library/adxl_345_imu.su ./Core/Src/library/airQuality.cyclo ./Core/Src/library/airQuality.d ./Core/Src/library/airQuality.o ./Core/Src/library/airQuality.su ./Core/Src/library/encoder.cyclo ./Core/Src/library/encoder.d ./Core/Src/library/encoder.o ./Core/Src/library/encoder.su ./Core/Src/library/gps.cyclo ./Core/Src/library/gps.d ./Core/Src/library/gps.o ./Core/Src/library/gps.su ./Core/Src/library/motorDriver.cyclo ./Core/Src/library/motorDriver.d ./Core/Src/library/motorDriver.o ./Core/Src/library/motorDriver.su ./Core/Src/library/sps30.cyclo ./Core/Src/library/sps30.d ./Core/Src/library/sps30.o ./Core/Src/library/sps30.su
+	-$(RM) ./Core/Src/library/BNO055.cyclo ./Core/Src/library/BNO055.d ./Core/Src/library/BNO055.o ./Core/Src/library/BNO055.su ./Core/Src/library/EEPROM.cyclo ./Core/Src/library/EEPROM.d ./Core/Src/library/EEPROM.o ./Core/Src/library/EEPROM.su ./Core/Src/library/INA219.cyclo ./Core/Src/library/INA219.d ./Core/Src/library/INA219.o ./Core/Src/library/INA219.su ./Core/Src/library/adxl_345_imu.cyclo ./Core/Src/library/adxl_345_imu.d ./Core/Src/library/adxl_345_imu.o ./Core/Src/library/adxl_345_imu.su ./Core/Src/library/airQuality.cyclo ./Core/Src/library/airQuality.d ./Core/Src/library/airQuality.o ./Core/Src/library/airQuality.su ./Core/Src/library/encoder.cyclo ./Core/Src/library/encoder.d ./Core/Src/library/encoder.o ./Core/Src/library/encoder.su ./Core/Src/library/gps.cyclo ./Core/Src/library/gps.d ./Core/Src/library/gps.o ./Core/Src/library/gps.su ./Core/Src/library/motorDriver.cyclo ./Core/Src/library/motorDriver.d ./Core/Src/library/motorDriver.o ./Core/Src/library/motorDriver.su ./Core/Src/library/sps30.cyclo ./Core/Src/library/sps30.d ./Core/Src/library/sps30.o ./Core/Src/library/sps30.su
 
 .PHONY: clean-Core-2f-Src-2f-library
 
